@@ -7,7 +7,7 @@
 </p>
 
 # QCRAFT-Multi-Batch Circuit Scheduling
-QCRAFT Multi-Batch Circuit Scheduling: a library that allows 
+QCRAFT Multi-Batch Circuit Scheduling: a library that enables efficient quantum hardware utilization through horizontal multi-programming, allowing multiple circuit batches to be executed sequentially within a single job, dramatically reducing cost and queue time.
 
 The scheduler has the following main functions:
 
@@ -57,7 +57,7 @@ Here is a basic example on how to send a Quirk URL to the Scheduler. The Quirk U
 ```python
 import requests
 
-data = {"url":"https://algassert.com/quirk#circuit={'cols':[['H'],['•','X'],['Measure','Measure']]}" ,"shots":1000, "provider":"ibm", "policy":"multibatch"} //poner multibatch
+data = {"url":"https://algassert.com/quirk#circuit={'cols':[['H'],['•','X'],['Measure','Measure']]}" ,"shots":1000, "provider":"ibm", "policy":"multibatch"} 
 requests.post(localhost:8082/url, json = data)
 ```
 
