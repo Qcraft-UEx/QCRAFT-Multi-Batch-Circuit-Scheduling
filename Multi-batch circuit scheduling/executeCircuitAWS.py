@@ -15,58 +15,264 @@ import numpy as np
 
 
 
+from braket.circuits import Circuit, Instruction, Gate
+from braket.circuits.compiler_directive import CompilerDirective
+
+from qiskit import QuantumCircuit
+import re
+from braket.circuits import Circuit, Gate, QubitSet
+
 import boto3
 import json
 
-def code_to_circuit_aws(self, code_str:str) -> braket.circuits.circuit.Circuit: #Inverse parser to get the circuit object from the string
-    """
-    Transforms a string representation of a circuit into a Braket circuit.
 
-    Args:
-        code_str (str): The string representation of the Braket circuit.
-        
-    Returns:
-        braket.circuits.circuit.Circuit: The circuit object.
-    """
-    # Split the code into lines
-    try:
-        lines = code_str.strip().split('\n')
-        # Initialize the circuit
-        circuit = braket.circuits.Circuit()
-        safe_namespace = {'np': np, 'pi': np.pi}
-        # Process each line
-        for line in lines:
+BARRIER_QUBIT = 9999  # qubit ficticio reservado para barreras
+#EL DE JORGE:
+# ============================================================
+#  CLEAN PARSER: USER CODE → AWS CIRCUIT
+# ============================================================
+
+def code_to_circuit_aws(user_code: str):
+    circuit = Circuit()
+    max_qubit = -1
+
+    # Normaliza saltos y limpia comentarios
+    lines = [ln.strip() for ln in user_code.split("\n") if ln.strip() and not ln.strip().startswith("#")]
+
+    for line in lines:
+
+        # ============================================================
+        #  BARRERAS
+        # ============================================================
+        if re.match(r"^barrier\(\s*\)$", line):
+            # barrier()
+            circuit.barrier()
+            continue
+
+        if match := re.match(r"^barrier\((.+)\)$", line):
+            qubits = eval(match.group(1))
+            if isinstance(qubits, int): qubits = [qubits]
+            circuit.barrier(QubitSet(qubits))
+            continue
+
+        # ============================================================
+        #  MEASURE
+        # ============================================================
+        if match := re.match(r"^measure\((.+)\)$", line):
+            qubits = eval(match.group(1))
+            if isinstance(qubits, int): qubits = [qubits]
+            circuit.measure(QubitSet(qubits))
+            continue
+
+        # ============================================================
+        #  RESET
+        # ============================================================
+        if match := re.match(r"^reset\((.+)\)$", line):
+            qubits = eval(match.group(1))
+            if isinstance(qubits, int): qubits = [qubits]
+            for q in qubits:
+                circuit.reset(q)
+            continue
+
+        # ============================================================
+        #  SWAP
+        # ============================================================
+        if match := re.match(r"^swap\((.+),(.+)\)$", line):
+            q1 = int(match.group(1))
+            q2 = int(match.group(2))
+            circuit.swap(q1, q2)
+            continue
+
+        # ============================================================
+        #  UNARIA (X,H,Z,RY,RX,RZ,...)
+        # ============================================================
+        if match := re.match(r"^(x|h|z|s|t|y)\((.+)\)$", line, re.IGNORECASE):
+            gate = match.group(1).lower()
+            q = int(match.group(2))
+            getattr(circuit, gate)(q)
+            continue
+
+        # Rotaciones
+        if match := re.match(r"^r([xyz])\(([^,]+),(.+)\)$", line, re.IGNORECASE):
+            axis = match.group(1).lower()
+            angle = float(match.group(2))
+            q = int(match.group(3))
+            getattr(circuit, f"r{axis}")(angle, q)
+            continue
+
+        # ============================================================
+        #  CNOT
+        # ============================================================
+        if match := re.match(r"^cnot\((.+),(.+)\)$", line):
+            c = int(match.group(1))
+            t = int(match.group(2))
+            circuit.cnot(c, t)
+            continue
+
+        # ============================================================
+        #  TOFFOLI (CCNOT)
+        # ============================================================
+        if match := re.match(r"^ccnot\((.+),(.+),(.+)\)$", line):
+            c1 = int(match.group(1))
+            c2 = int(match.group(2))
+            t = int(match.group(3))
+            circuit.ccnot(c1, c2, t)
+            continue
+
+        # ============================================================
+        #  FUNCIONES AWS NATIVAS (directas)
+        # ============================================================
+        try:
             if line.startswith("circuit."):
-                # Parse gate operations
-                operation = line.split('circuit.')[1]
-                gate_name = operation.split('(')[0]
-                if gate_name in ['rx', 'ry', 'rz', 'gpi', 'gpi2', 'phaseshift']:
-                    # These gates have a parameter
-                    args = operation.split('(')[1].strip(')').split(',')
-                    target_qubit = int(args[0].split('+')[0]) + int(args[0].split('+')[1].strip(') ')) if '+' in args[0] else int(args[0].strip(') ').strip())
-                    angle = eval(args[1], {"__builtins__": None}, safe_namespace)
-                    getattr(circuit, gate_name)(target_qubit, angle)
-                elif gate_name in ['xx', 'yy', 'zz'] or 'cphase' in gate_name:
-                    # These gates have 2 parameters
-                    args = operation.split('(')[1].strip(')').split(',')
-                    target_qubits = [int(arg.split('+')[0]) + int(arg.split('+')[1].strip(') ')) if '+' in arg else int(arg.strip(') ').strip()) for arg in args[:-1]]
-                    angle = eval(args[-1], {"__builtins__": None}, safe_namespace)
-                    getattr(circuit, gate_name)(*target_qubits, angle)
-                elif gate_name == 'ms':
-                    # These gates have multiple parameters (3)
-                    args = operation.split('(')[1].strip(')').split(',')
-                    target_qubits = [int(arg.split('+')[0]) + int(arg.split('+')[1].strip(') ')) if '+' in arg else int(arg.strip(') ').strip()) for arg in args[:-3]]
-                    angles = [eval(arg, {"__builtins__": None}, safe_namespace) for arg in args[-3:]]
-                    getattr(circuit, gate_name)(*target_qubits, *angles)
-                else:
-                    args = operation.split('(')[1].strip(')').split(',')
-                    target_qubits = [int(arg.split('+')[0]) + int(arg.split('+')[1].strip(') ')) if '+' in arg else int(arg.strip(') ').strip()) for arg in args if not any(c.isalpha() for c in arg)]
-                    params = [eval(arg, {"__builtins__": None}, safe_namespace) for arg in args if any(c.isalpha() for c in arg)]
-                    getattr(circuit, gate_name)(*target_qubits)
-    except Exception as e:
-        raise ValueError("Invalid circuit code")
-                
+                eval(line, {"circuit": circuit, "Circuit": Circuit, "Gate": Gate})
+                continue
+        except Exception:
+            pass
+
+        print(f"[AVISO] Línea no reconocida y omitida: {line}")
+
     return circuit
+
+
+
+# ============================================================
+#  ANALIZADOR DEL CIRCUITO
+# ============================================================
+
+def analyze_braket_circuit(circ: Circuit):
+    used = sorted({int(q) for instr in circ.instructions for q in instr.target})
+    gate_count = {}
+
+    for instr in circ.instructions:
+        op = instr.operator.__class__.__name__.lower()
+        gate_count[op] = gate_count.get(op, 0) + 1
+
+    return {
+        "used_qubits": used,
+        "total_instructions": len(circ.instructions),
+        "gate_count": gate_count,
+        "has_measure": any(instr.operator.__class__.__name__ == "Measure" for instr in circ.instructions),
+        "has_reset": any(instr.operator.__class__.__name__ == "Reset" for instr in circ.instructions),
+        "has_barrier": any(instr.operator.__class__.__name__ == "Barrier" for instr in circ.instructions),
+    }
+
+
+
+# ============================================================
+#  EXPORTACIÓN A QASM (AWS → QISKIT)
+# ============================================================
+
+def braket_to_qiskit(circ: Circuit):
+    used = sorted({int(q) for instr in circ.instructions for q in instr.target})
+    qc = QuantumCircuit(len(used))
+
+    qmap = {q: i for i, q in enumerate(used)}  # remapping
+
+    for instr in circ.instructions:
+        op = instr.operator.__class__.__name__.lower()
+        t = [qmap[int(q)] for q in instr.target]
+
+        if op == "h": qc.h(t[0])
+        elif op == "x": qc.x(t[0])
+        elif op == "z": qc.z(t[0])
+        elif op == "y": qc.y(t[0])
+        elif op == "s": qc.s(t[0])
+        elif op == "t": qc.t(t[0])
+        elif op == "cnot": qc.cx(t[0], t[1])
+        elif op == "ccnot": qc.ccx(t[0], t[1], t[2])
+        elif op == "barrier": qc.barrier(t)
+        elif op == "measure": qc.measure(t, t)
+        elif op == "swap": qc.swap(t[0], t[1])
+        elif op.startswith("r"):  # rotations
+            angle = instr.operator.angle
+            if op == "rx": qc.rx(angle, t[0])
+            if op == "ry": qc.ry(angle, t[0])
+            if op == "rz": qc.rz(angle, t[0])
+
+    return qc
+
+#MIO:
+def diagram_with_barriers(circuit):
+    lines = []
+    for instr in circuit.instructions:
+
+        if instr.target == BARRIER_QUBIT:
+            lines.append("BARRIER")
+            continue
+
+        if instr.operator.name == "Measure":
+            qubits = [q.qubit for q in instr.target]
+            lines.append(f"MEASURE {qubits}")
+            continue
+
+        lines.append(str(instr))
+    return "\n".join(lines)
+
+
+
+
+
+
+def add_measurements_to_circuit(circuit):
+    """
+    Agrega mediciones a todos los qubits usados en el circuito.
+    Ignora qubits ficticios usados como barreras (ej. 9999).
+    """
+    all_qubits = set()
+    for instr in circuit.instructions:
+        if hasattr(instr, "target"):
+            # Agregamos solo qubits válidos (no 9999)
+            all_qubits.update(q for q in instr.target if q != 9999)
+
+    # Convertimos el set a lista ordenada y medimos todos los qubits
+    circuit.measure(list(sorted(all_qubits)))
+
+    return circuit
+
+
+# def code_to_circuit_aws(code_str: str):
+#     """
+#     Construye un objeto braket.circuits.Circuit ejecutando el código Python
+#     generado por create_circuit(), eliminando importaciones y returns.
+#     """
+
+#     # 1. Eliminar imports y returns (NO pueden ir dentro del exec limitado)
+#     clean_lines = []
+#     for line in code_str.split("\n"):
+#         stripped = line.strip()
+#         if stripped.startswith("import "): continue
+#         if stripped.startswith("from "): continue
+#         if stripped.startswith("return"): continue
+#         clean_lines.append(line)
+#     code_str = "\n".join(clean_lines)
+
+#     # 2. Entorno seguro para exec
+#     safe_globals = {
+#         "__builtins__": {},  # deshabilita imports
+#         "Circuit": braket.circuits.Circuit,
+#         "np": np,
+#         "pi": np.pi
+#     }
+
+#     # Necesario si el usuario no define "circuit = Circuit()"
+#     safe_locals = {"circuit": braket.circuits.Circuit()}
+
+#     try:
+#         exec(code_str, safe_globals, safe_locals)
+
+#         circuit = safe_locals.get("circuit")
+#         if circuit is None:
+#             raise ValueError("El código no produjo un objeto 'circuit'.")
+
+#         return circuit
+
+#     except Exception as e:
+#         print("\n❌ Error ejecutando el código del circuito AWS:")
+#         print(e)
+#         print("Código recibido:\n", code_str)
+#         raise
+
+
 
 def get_transpiled_circuit_depth_aws(circuit:braket.circuits.Circuit, backend) -> None:
     """
@@ -186,7 +392,7 @@ def runAWS_save(machine:str, circuit:Circuit, shots:int, users:list, qubit_numbe
 
     if "sv1" not in machine and "tn1" not in machine:
 
-        s3_folder = ('amazon-braket-jorgecs', 'test/')  # Correct format #TODO change this
+        s3_folder = ('amazon-braket-jorgecs', 'Test Circuits/')  # Correct format #TODO change this
 
         task = device.run(circuit, s3_folder, shots=x, poll_timeout_seconds=5 * 24 * 60 * 60) # Hacer lo mismo que con ibm para recuperar los resultados, guardar el id, usuarios... y despues en el scheduler, al iniciarlo, buscar el el bucket s3 si están los resultados, si no, esperar a que lleguen
 

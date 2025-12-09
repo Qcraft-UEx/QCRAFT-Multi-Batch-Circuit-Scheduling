@@ -1,0 +1,25 @@
+=== Información de circuitos ejecutados ===
+Circuito: full_adder.py | Registros clásicos: c0 - c3 | Iteración: 1 | Batch: 1
+Circuito: simon.py | Registros clásicos: c4 - c9 | Iteración: 1 | Batch: 1
+Circuito: tsp.py | Registros clásicos: c10 - c12 | Iteración: 1 | Batch: 1
+Circuito: qft.py | Registros clásicos: c13 - c15 | Iteración: 1 | Batch: 1
+Circuito: simon.py | Registros clásicos: c16 - c21 | Iteración: 1 | Batch: 1
+Circuito: phase_estimation.py | Registros clásicos: c22 - c25 | Iteración: 1 | Batch: 1
+Circuito: phase_estimation.py | Registros clásicos: c26 - c29 | Iteración: 1 | Batch: 1
+Circuito: kickback.py | Registros clásicos: c30 - c31 | Iteración: 1 | Batch: 1
+Circuito: shor.py | Registros clásicos: c32 - c35 | Iteración: 1 | Batch: 2
+Circuito: tsp.py | Registros clásicos: c36 - c38 | Iteración: 1 | Batch: 2
+Circuito: Deutsch-Jozsa.py | Registros clásicos: c39 - c42 | Iteración: 1 | Batch: 2
+Circuito: Deutsch-Jozsa.py | Registros clásicos: c43 - c46 | Iteración: 1 | Batch: 2
+Circuito: shor.py | Registros clásicos: c47 - c50 | Iteración: 1 | Batch: 2
+Circuito: qwalk.py | Registros clásicos: c51 - c53 | Iteración: 1 | Batch: 2
+Circuito: qwalk.py | Registros clásicos: c54 - c56 | Iteración: 1 | Batch: 2
+Circuito: qft.py | Registros clásicos: c57 - c59 | Iteración: 1 | Batch: 2
+Circuito: full_adder.py | Registros clásicos: c60 - c63 | Iteración: 1 | Batch: 2
+Circuito: kickback.py | Registros clásicos: c64 - c65 | Iteración: 1 | Batch: 2
+Circuito: bernstein-vazirani.py | Registros clásicos: c66 - c69 | Iteración: 1 | Batch: 3
+Circuito: bernstein-vazirani.py | Registros clásicos: c70 - c73 | Iteración: 1 | Batch: 3
+Circuito: grover.py | Registros clásicos: c74 - c75 | Iteración: 1 | Batch: 3
+Circuito: grover.py | Registros clásicos: c76 - c77 | Iteración: 1 | Batch: 3
+Circuito: qaoa.py | Registros clásicos: c78 - c79 | Iteración: 1 | Batch: 3
+Circuito: qaoa.py | Registros clásicos: c80 - c81 | Iteración: 1 | Batch: 3

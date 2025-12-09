@@ -1,0 +1,6 @@
+
+ Iteración 1 - Máquina: arn:aws:braket:::device/quantum-simulator/amazon/sv1 -- Ejecución final parcial
+  Batch #1: [('shor.py', 4 qubits, shots=1), ('qaoa.py', 2 qubits, shots=1), ('kickback.py', 2 qubits, shots=1), ('grover.py', 2 qubits, shots=1), ('bernstein-vazirani.py', 4 qubits, shots=1), ('qft.py', 3 qubits, shots=1), ('tsp.py', 3 qubits, shots=1), ('phase_estimation.py', 4 qubits, shots=1), ('simon.py', 6 qubits, shots=1), ('qwalk.py', 3 qubits, shots=1), ]
+    Total qubits usados: 33
+  Batch #2: [('Deutsch-Jozsa.py', 4 qubits, shots=1), ('full_adder.py', 4 qubits, shots=1), ]
+    Total qubits usados: 8

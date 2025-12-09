@@ -10,7 +10,7 @@ import logging
 import uuid
 import re
 from scheduler_policies import SchedulerPolicies
-from executeCircuitIBM import executeCircuitIBM
+#from executeCircuitIBM import executeCircuitIBM
 from executeCircuitAWS import retrieve_result_aws, code_to_circuit_aws
 import os
 from threading import Thread, Lock
@@ -65,12 +65,12 @@ class Scheduler:
         self.scheduler_policies = SchedulerPolicies(self.app)
         #self.max_qubits = 127
 
-        self.executeCircuitIBM = self.scheduler_policies.get_ibm()
+        #self.executeCircuitIBM = self.scheduler_policies.get_ibm()
 
         self.transpilation_machine = self.scheduler_policies.get_ibm_machine()
-        self.service = self.executeCircuitIBM.load_account_ibm()
+        #self.service = self.executeCircuitIBM.load_account_ibm()
 
-        if self.transpilation_machine != 'local': self.transpilation_backend = self.executeCircuitIBM.obtain_machine(self.service, self.transpilation_machine)
+        #if self.transpilation_machine != 'local': self.transpilation_backend = self.executeCircuitIBM.obtain_machine(self.service, self.transpilation_machine)
 
         self.app.route('/url', methods=['POST'])(self.store_url)
         self.app.route('/circuit', methods=['POST'])(self.store_url_circuit)
@@ -332,6 +332,7 @@ class Scheduler:
                         if provider == 'ibm':
                             circ = self.executeCircuitIBM.code_to_circuit_ibm(code) #check this method because if a lot of circuits enter at the same time, it fails
                             maxDepth = self.executeCircuitIBM.get_transpiled_circuit_depth_ibm(circ, self.transpilation_backend)
+                            continue
                         elif provider == 'aws':
                             #TODO
                             maxDepth = max(sum(1 for j in circuit['cols'] if i < len(j) and j[i] not in {1, 'Measure'}) for i in range(num_qubits))
@@ -399,8 +400,12 @@ class Scheduler:
         lines = circuit.split('\n')
         importAWS = next((line for line in lines if 'braket.circuits' in line), None)
         importIBM = next((line for line in lines if 'qiskit' in line), None)
+        # importAWS = next((line for line in lines if line.strip().startswith('from braket.circuits')), None)
+        # importIBM = None
+
 
         if importIBM:
+            
             circ = self.executeCircuitIBM.code_to_circuit_ibm(circuit)
             # Parse the circuit and extract the number of qubits
             num_qubits_line = next((line.split('#')[0].strip() for line in lines if '= QuantumRegister(' in line.split('#')[0]), None)

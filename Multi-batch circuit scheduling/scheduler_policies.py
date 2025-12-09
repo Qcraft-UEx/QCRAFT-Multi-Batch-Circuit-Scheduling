@@ -2,8 +2,8 @@ import json
 import requests
 from flask import request
 import re
-from executeCircuitIBM import executeCircuitIBM
-from executeCircuitAWS import runAWS, runAWS_save, code_to_circuit_aws, AWS 
+#from executeCircuitIBM import executeCircuitIBM
+from executeCircuitAWS import add_measurements_to_circuit, runAWS, runAWS_save, code_to_circuit_aws, AWS 
 from ResettableTimer import ResettableTimer
 from threading import Thread
 from typing import Callable
@@ -17,8 +17,17 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
-from qiskit_ibm_runtime import QiskitRuntimeService, SamplerV2 as Sampler, Batch
+#from qiskit_ibm_runtime import QiskitRuntimeService, SamplerV2 as Sampler, Batch
+#from qiskit import QuantumCircuit
+
 from qiskit import QuantumCircuit
+from qiskit.visualization import circuit_drawer
+import matplotlib.pyplot as plt
+from braket.circuits.compiler_directive import CompilerDirective
+from qiskit import QuantumCircuit
+import numpy as np
+
+from braket.circuits import Circuit
 
 from itertools import combinations
 
@@ -27,7 +36,7 @@ import subprocess
 
 import sys
 
-CARPETA_SALIDAS = os.path.join("QCRAFT-Scheduler", "QCRAFT-Scheduler", "salidas")
+CARPETA_SALIDAS = os.path.join("Multi-batch circuit scheduling", "salidas")
 class Policy:
     """
     Class to store the queues and timers of a policy
@@ -96,14 +105,23 @@ class SchedulerPolicies:
         self.iteracion_tiempo = 0
         self.iteracion_ML = 0
         self.app = app
-        self.time_limit_seconds = 600#300 #estaba en 600
-        self.executeCircuitIBM = executeCircuitIBM()
+        self.time_limit_seconds = 13#300 #estaba en 600
+
+
+        #AQUI PARA CAMBBIAR LO DE LOS RESULTADOS, CAMBIADO EN UNO SE CAMBIA EN TODOS Y ASI
+
+        self.resultado=30 #Para poner que circuito estamos haciendo y velro en las salidas y en los ejecutados
+
+
+
+        #self.executeCircuitIBM = executeCircuitIBM()
+        self.executeCircuitAWS = AWS()
         
         self.setMaxQubits()
-        self.max_qubits = 266 #254 o 266
-        self.max_qubits_send = 133 #127 o 133
+        self.max_qubits = 68 #ibm: 254 o 266 | en aws: 68 qubits
+        self.max_qubits_send = 34 #ibm: 127 o 133 | en aws: 34 qubits
         self.machine_ibm = 'ibm_torino' # ibm_brisbane o ibm_torino
-        self.machine_aws = 'local'
+        self.machine_aws = 'arn:aws:braket:::device/quantum-simulator/amazon/sv1'
         
 
         self.services = {'time': Policy(self.send, self.max_qubits_send, self.time_limit_seconds, self.executeCircuit, self.machine_aws, self.machine_ibm),
@@ -186,69 +204,302 @@ class SchedulerPolicies:
         if not self.services[service_name].timers[provider].is_alive():
             self.services[service_name].timers[provider].start()
         n_qubits = sum(item[1] for item in self.services[service_name].queues[provider])
-        if n_qubits >= 254 and (service_name != 'time_maquinas' and service_name != 'MaxML' and service_name != 'MaxPD' and service_name != 'time'): #es 127
+        if n_qubits >= 254 and (service_name != 'time_maquinas' and service_name != 'MaxML' and service_name != 'MaxPD' and service_name != 'time' and service_name != 'multibatch'): #es 127
            self.services[service_name].timers[provider].execute_and_reset()
         return 'Data received', 200
         
      #EL BUENO QUE HAY
-    def executeCircuit(self,data:dict,qb:list,shots:list,provider:str,urls:list, machine:str) -> None: #Data is the composed circuit to execute, qb is the number of qubits per circuit, shots is the number of shots per circut, provider is the provider of the circuit, urls is the array with data of each circuit (url, num_qubits, shots, user, circuit_name)
+    def executeCircuit(self, data: dict, qb: list, shots: list, provider: str, urls: list, machine: str) -> None:
         """
-        Executes the circuit in the selected provider
-
-        Args:
-            data (dict): The data of the circuit to execute            
-            qb (list): The number of qubits per circuit            
-            shots (list): The number of shots per circuit
-            provider (str): The provider of the circuit            
-            urls (list): The data of each circuit            
-            machine (str): The machine to execute the circuit
-
-        Raises:
-            Exception: If an error occurs during the execution of the circuit
+        Ejecuta el circuito en el proveedor seleccionado. Ahora con soporte AWS (provider == 'aws').
+        Mantiene la interfaz de entrada que usabas para IBM.
         """
+        circuit_code_str = ''
+        for line in json.loads(data)['code']:
+            circuit_code_str += line + '\n'
 
-        circuit = ''
-        for data in json.loads(data)['code']:
-            circuit = circuit + data + '\n'
-        
         loc = {}
         if provider == 'ibm':
-            loc['circuit'] = self.executeCircuitIBM.code_to_circuit_ibm(circuit)
+            # mantener compatibilidad si aún existe soporte IBM en otro módulo
+            loc['circuit'] = self.executeCircuitIBM.code_to_circuit_ibm(circuit_code_str)
         else:
-            loc['circuit'] = code_to_circuit_aws(circuit)
+            # AWS: transformar a objeto braket Circuit
+            loc['circuit'] = code_to_circuit_aws(circuit_code_str)
+            #loc['circuit'] = add_measurements_to_circuit(loc['circuit'])  # AGREGAMOS MEDICIONES
 
-
-        #circuit = 'def circ():\n'
-        #f = json.loads(data)
-        #for line in f['code']: #Construir el circuito según lo obtenido del traductor
-        #    circuit = circuit + '\t' + line + '\n'
-#
-        #circuit = circuit + 'circuit = circ()'
-#
-        #print(circuit)
-#
-        #loc = {}
-        #exec(circuit,globals(),loc) #Recuperar el objeto circuito que se obtiene, cuidado porque si el código del circuito no está controlado, esto es muy peligroso
-        # Aquí se podría comprobar la mejor máquina para ejecutar el circuito
         print('_____________________________________________________________________')
         #print(loc['circuit'])
+        
         print('_____________________________________________________________________')
         try:
+            circuit = loc['circuit']
+            with open(f"circuito_ASCII_{self.resultado}.txt", "w", encoding="utf-8") as f:
+                f.write(str(circuit))
+                
+            print("\n=== INSTRUCCIONES BRAKET ===")
+            for i, instr in enumerate(circuit.instructions):
+                print(f"{i}: {instr}")
+            print("\n=== ANALISIS DEL CIRCUITO ===")
+            analysis = self.analyze_braket_circuit(circuit)
+            for k, v in analysis.items():
+                print(f"{k}: {v}")
+            # ================================================================
+            #   🔥 2) GUARDAR IR del circuito (archivo .ir)
+            # ================================================================
+            qiskit_circ = self.braket_to_qiskit(loc['circuit'])
+            # print("\n===== QASM del circuito ejecutado =====\n")
+            # print(qiskit_circ.qasm())
+
+            #loc['circuit'] = add_measurements_to_circuit(loc['circuit'])  # AGREGAMOS MEDICIONES
+            print("\n===== Qiskit del circuito ejecutado =====\n")
+            #print(circuit)
+            #print(qiskit_circ)
+            # fig = qiskit_circ.draw(output='mpl', scale=1.3)
+            # plt.savefig("circuito_ejecutado.png", dpi=300)
+            # plt.close()
+            # print("✓ Diagrama guardado en circuito_ejecutado.png")
+
+            diagram_text = qiskit_circ.draw(output='text')
+            print("\n===== Diagrama del circuito ejecutado =====\n")
+            #print(diagram_text)
+            with open(f"circuito_ejecutado{self.resultado}.txt", "w", encoding="utf-8") as f:
+                f.write(str(diagram_text))
+            print(f"✓ Diagrama guardado en circuito_ejecutado{self.resultado}.txt")
+
+            # circuit = loc['circuit']
+            
+            # # Genera un diagrama de texto
+            # diagram_text = circuit.to_ir().to_string()
+            # print(diagram_text)
+
+            # # Guardarlo en un archivo
+            # with open("circuito_ejecutado.txt", "w") as f:
+            #     f.write(diagram_text)
+
             if provider == 'ibm':
-                #backend = least_busy_backend_ibm(sum(qb))
-                # TODO escoger el backend más adecuado para el circuito
-                #counts = runIBM(self.machine_ibm,loc['circuit'],max(shots)) #Ejecutar el circuito y obtener el resultado
-                counts = self.executeCircuitIBM.runIBM_save(machine,loc['circuit'],max(shots),[url[3] for url in urls],qb,[url[4] for url in urls]) #Ejecutar el circuito y obtener el resultado
+                counts = self.executeCircuitIBM.runIBM_save(machine, loc['circuit'], max(shots), [url[3] for url in urls], qb, [url[4] for url in urls])
             else:
-                counts = runAWS_save(machine,loc['circuit'],max(shots),[url[3] for url in urls],qb,[url[4] for url in urls],'') #Ejecutar el circuito y obtener el resultado
+                #counts = runAWS_save(machine, loc['circuit'], max(shots), [url[3] for url in urls], qb, [url[4] for url in urls], '')
+                counts = {}
         except Exception as e:
             print(f"Error executing circuit: {e}")
+            counts = {}
 
-        #print(counts.items())
+        payload = {"counts": counts, "shots": shots, "provider": provider, "qb": qb, "users": [url[3] for url in urls], "circuit_names": [url[4] for url in urls]}  #AQUI TAMBIEN SE PONEN SHOTS
+        # Post a tu unscheduler endpoint (igual que antes)
+        try:
+            requests.post(self.unscheduler, json=payload)
+        except Exception as e:
+            print(f"Warning: no se pudo avisar al unscheduler: {e}")
 
-        data = {"counts": counts, "shots": shots, "provider": provider, "qb": qb, "users": [url[3] for url in urls], "circuit_names": [url[4] for url in urls]}
+    
+    def braket_to_qiskit(self, braket_circ):
+        """
+        Convierte un circuito de AWS Braket a Qiskit.
+        """
+        try:
+            # Contar qubits usados
+            used_qubits = set()
+            for instr in braket_circ.instructions:
+                # Obtener qubits de la instrucción
+                qubits = []
+                for q in instr.target:
+                    if hasattr(q, "qubit"):
+                        qubit_val = q.qubit
+                    elif hasattr(q, "index"):
+                        qubit_val = q.index
+                    else:
+                        qubit_val = int(q)
+                    qubits.append(qubit_val)
+                
+                # Solo agregar qubits reales (no especiales como barrera)
+                if qubits and qubits[0] != 9999:
+                    used_qubits.update(qubits)
+            
+            nq = max(used_qubits) + 1 if used_qubits else 0
+            qc = QuantumCircuit(nq, nq)
+            
+            for instr in braket_circ.instructions:
+                # Obtener qubits
+                qubits = []
+                for q in instr.target:
+                    if hasattr(q, "qubit"):
+                        qubit_val = q.qubit
+                    elif hasattr(q, "index"):
+                        qubit_val = q.index
+                    else:
+                        qubit_val = int(q)
+                    qubits.append(qubit_val)
+                
+                if not hasattr(instr, "operator"):
+                    continue
+                
+                name = instr.operator.name.lower()
+                
+                # 🔹 BARRERA
+                if name == "barrier":
+                    if qubits:
+                        qc.barrier(*qubits)
+                    else:
+                        qc.barrier(*range(nq))
+                    continue
+                if name == "reset":
+                    for q in qubits:
+                        qc.reset(q)
+                    continue
 
-        requests.post(self.unscheduler, json=data)
+                # 🔹 PUERTA I (IDENTIDAD) - ignorar o mostrar
+                if name == "i" or name == "id":
+                    # La identidad no hace nada, podemos ignorarla
+                    # o agregarla como comentario
+                    continue
+                
+                # 🔹 RESTANTE DEL CÓDIGO (igual que antes)
+                # ---- 1-qubit gates ----
+                if name == "h": 
+                    qc.h(qubits[0])
+                elif name == "x": 
+                    qc.x(qubits[0])
+                elif name == "y": 
+                    qc.y(qubits[0])
+                elif name == "z": 
+                    qc.z(qubits[0])
+                elif name == "s": 
+                    qc.s(qubits[0])
+                elif name == "sdg" or name == "si": 
+                    qc.sdg(qubits[0])
+                elif name == "t": 
+                    qc.t(qubits[0])
+                elif name == "tdg" or name == "ti": 
+                    qc.tdg(qubits[0])
+                elif name == "rx": 
+                    angle = getattr(instr.operator, 'angle', 0)
+                    qc.rx(angle, qubits[0])
+                elif name == "ry": 
+                    angle = getattr(instr.operator, 'angle', 0)
+                    qc.ry(angle, qubits[0])
+                elif name == "rz": 
+                    angle = getattr(instr.operator, 'angle', 0)
+                    qc.rz(angle, qubits[0])
+                elif name == "phaseshift": 
+                    angle = getattr(instr.operator, 'angle', 0)
+                    qc.p(angle, qubits[0])
+                elif name == "v":
+                    # V = sqrt(X) ≈ RX(pi/2)
+                    qc.rx(np.pi/2, qubits[0])
+                elif name == "vi":
+                    # Vi = sqrt(X)^† ≈ RX(-pi/2)
+                    qc.rx(-np.pi/2, qubits[0])
+
+                # ---- 2-qubit gates ----
+                elif name in ("cnot", "cx"):
+                    qc.cx(qubits[0], qubits[1])
+                elif name == "cy":
+                    qc.cy(qubits[0], qubits[1])
+                elif name == "cz":
+                    qc.cz(qubits[0], qubits[1])
+                elif name == "ch":
+                    qc.ch(qubits[0], qubits[1])
+                elif name in ("cphaseshift", "cphase"):
+                    angle = getattr(instr.operator, 'angle', 0)
+                    qc.cp(angle, qubits[0], qubits[1])
+                elif name == "swap":
+                    qc.swap(qubits[0], qubits[1])
+                elif name == "iswap":
+                    qc.iswap(qubits[0], qubits[1])
+                elif name in ("xx", "yy", "zz", "xy"):
+                    angle = getattr(instr.operator, 'angle', 0)
+                    if name == "xx":
+                        qc.rxx(angle, qubits[0], qubits[1])
+                    elif name == "yy":
+                        qc.ryy(angle, qubits[0], qubits[1])
+                    elif name == "zz":
+                        qc.rzz(angle, qubits[0], qubits[1])
+                    elif name == "xy":
+                        # XY ≈ RXX + RYY (aproximación)
+                        qc.rxx(angle/2, qubits[0], qubits[1])
+                        qc.ryy(angle/2, qubits[0], qubits[1])
+
+                # ---- 3-qubit gates ----
+                elif name == "ccnot" or name == "toffoli":
+                    qc.ccx(qubits[0], qubits[1], qubits[2])
+                elif name == "cswap" or name == "fredkin":
+                    qc.cswap(qubits[0], qubits[1], qubits[2])
+                
+                else:
+                    print(f"[WARN] Puerta '{name}' no soportada en conversión")
+            
+            # Agregar medidas para visualización
+            for q in range(nq):
+                qc.measure(q, q)
+            
+            return qc
+            
+        except Exception as e:
+            print(f"Error en braket_to_qiskit: {e}")
+            import traceback
+            traceback.print_exc()
+            return QuantumCircuit(1, 1)
+    def analyze_braket_circuit(self, circuit):
+        """
+        Analiza un circuito de AWS Braket y devuelve un diccionario con:
+        - qubits usados
+        - total de puertas
+        - conteo de cada puerta
+        - si tiene measure, reset, barrier, etc
+        """
+
+        info = {
+            "used_qubits": set(),
+            "total_instructions": 0,
+            "gate_count": {},
+            "has_measure": False,
+            "has_reset": False,
+            "has_barrier": False,
+            "unsupported": []
+        }
+
+        for instr in circuit.instructions:
+            info["total_instructions"] += 1
+
+            # Obtener nombre
+            name = instr.operator.name.lower()
+
+            # Contar puerta
+            if name not in info["gate_count"]:
+                info["gate_count"][name] = 0
+            info["gate_count"][name] += 1
+
+            # Qubits usados
+            for q in instr.target:
+                try:
+                    info["used_qubits"].add(int(q))
+                except:
+                    pass
+
+            # Detectar tipos de operación
+            if "measure" in name:
+                info["has_measure"] = True
+
+            if "reset" in name:
+                info["has_reset"] = True
+
+            if "barrier" in name:
+                info["has_barrier"] = True
+
+            # Detectar puertas no estándar
+            known = [
+                "x","y","z","h","s","sdg","t","tdg","rx","ry","rz","phaseshift",
+                "cnot","cx","cy","cz","cp","cphaseshift","swap","xx","yy","zz",
+                "ccnot","toffoli","iswap","barrier","measure"
+            ]
+
+            if name not in known:
+                info["unsupported"].append(name)
+
+        info["used_qubits"] = sorted(list(info["used_qubits"]))
+
+        return info
 
 
     def most_repetitive(self, array:list) -> int: #Check the most repetitive element in an array and if there are more than one, return the smallest
@@ -279,84 +530,277 @@ class SchedulerPolicies:
 
     #def create_circuit(self, urls: list, code: list, qb: list, provider: str) -> None:
     def create_circuit(self, urls: list, code: list, qb: list, provider: str) -> None:
-
         """
-        Creates the circuit with barriers between individual circuits and batches.
+        Crea el circuito final concatenando subcircuitos.
+        Mantiene intactos: barrier(), measure(), reset().
+        Para AWS Braket se ajustan solo los offsets de qubits.
         """
-        composition_qubits = 0
-        composition_classical_registers = 0
-        max_qb = max(url[1] for url in urls) #Get the maximum number of qubits in the urls
-        total_classical_registers = sum(url[1] for url in urls) #Get the total number of qubits in the urls
+        composition_offset = 0
+        classical_offset = 0
+        max_qb = max(url[1] for url in urls) if urls else 0
+        total_classical = sum(url[1] for url in urls) if urls else 0
 
+        # ---------------------------
+        #  PREÁMBULOS
+        # ---------------------------
         if provider == 'ibm':
-            # Preámbulo para IBM
-            code.insert(0, "circuit = QuantumCircuit(qreg_q, creg_c)")
-            code.insert(0, f"creg_c = ClassicalRegister({total_classical_registers}, 'c')")
-            code.insert(0, f"qreg_q = QuantumRegister({max_qb}, 'q')")
-            code.insert(0, "from numpy import pi")
-            code.insert(0, "import numpy as np")
-            code.insert(0, "from qiskit import QuantumRegister, ClassicalRegister, QuantumCircuit")
-            code.insert(0, "from qiskit.circuit.library import MCXGate, MCMT, XGate, YGate, ZGate")
+            header = [
+                "from qiskit import QuantumRegister, ClassicalRegister, QuantumCircuit",
+                "from qiskit.circuit.library import MCXGate, MCMT, XGate, YGate, ZGate",
+                "import numpy as np",
+                "from numpy import pi",
+                f"qreg_q = QuantumRegister({max_qb}, 'q')",
+                f"creg_c = ClassicalRegister({total_classical}, 'c')",
+                "circuit = QuantumCircuit(qreg_q, creg_c)"
+            ]
+        else:  # provider == 'aws'
+            header = [
+                "from braket.circuits import Circuit",
+                "import numpy as np",
+                "from math import pi",
+                "circuit = Circuit()"
+            ]
 
-        elif provider == 'aws':
-            # Preámbulo para AWS
-            code.insert(0, "circuit = Circuit()")
-            code.insert(0, "from numpy import pi")
-            code.insert(0, "import numpy as np")
-            code.insert(0, "from collections import Counter")
-            code.insert(0, "from braket.circuits import Circuit")
+        code.extend(header)
+        assembled = []
 
-        for batch_idx, batch in enumerate(urls):
-            urls_batch, sumQb, batchNr = batch
-            print("DEBUG urls_batch:", urls_batch)
+        # ---------------------------
+        #  PROCESAMIENTO POR BATCHES
+        # ---------------------------
+        for urls_batch, num_qubits, batchNr in urls:
+            for (url, q_used, shots_usr, uid, filename, lineno, flag) in urls_batch:
 
-            for url, num_qubits, shots, uid, filename, lineno, flag in urls_batch:
+                # ---------------------------
+                #  Obtención de líneas
+                # ---------------------------
                 if 'algassert' in url:
                     try:
-                        x = requests.post(self.translator + provider + '/individual', json={'url': url, 'd': composition_qubits})
+                        x = requests.post(self.translator + provider + '/individual',
+                                        json={'url': url, 'd': composition_offset})
                         data = json.loads(x.text)
-                        for elem in data['code']:
-                            code.append(elem)
+                        lines = data['code']
                     except Exception as e:
                         print(f"Error translating circuit {url}: {e}")
                         continue
                 else:
-                    lines = url.split('\n')
-                    for line in lines:
-                        if provider == 'ibm':
-                            line = line.replace('qreg_q[', f'qreg_q[{composition_qubits}+')
-                            line = line.replace('creg_c[', f'creg_c[{composition_classical_registers}+')
-                        elif provider == 'aws':
-                            gate_name = re.search(r'circuit\.(.*?)\(', line).group(1) if 'circuit.' in line else None
-                            if gate_name in ['rx', 'ry', 'rz', 'gpi', 'gpi2', 'phaseshift']:
-                                line = re.sub(rf'{gate_name}\(\s*(\d+)', lambda m: f"{gate_name}({int(m.group(1)) + composition_qubits}", line, count=1)
-                            elif gate_name in ['xx', 'yy', 'zz', 'ms'] or 'cphase' in gate_name:
-                                line = re.sub(rf'{gate_name}\((\d+),\s*(\d+)', lambda m: f"{gate_name}({int(m.group(1)) + composition_qubits},{int(m.group(2)) + composition_qubits}", line, count=1)
-                            else:
-                                line = re.sub(r'(\d+)', lambda m: str(int(m.group(1)) + composition_qubits), line)
-                        code.append(line)
+                    lines = url.split("\n")
 
-                # Añadir barrera después de cada circuito individual (solo para IBM)
-                #if provider == 'ibm' and url_idx < len(urls) - 1:
-                #    code.append(f"circuit.barrier(range({composition_qubits}, {composition_qubits + num_qubits}))")
+                # ---------------------------
+                #  Ajustar índices para AWS
+                # ---------------------------
+                for line in lines:
 
-                composition_qubits += num_qubits
-                composition_classical_registers += num_qubits
+                    # ------------ Para IBM ------------
+                    if provider == "ibm":
+                        # Ajustar índices de qreg y creg
+                        line = line.replace('qreg_q[', f'qreg_q[{composition_offset}+')
+                        line = line.replace('creg_c[', f'creg_c[{classical_offset}+')
+                        assembled.append(line)
+                        continue
 
-                qb.append(num_qubits)
+                    # ------------ Para AWS ------------
+                    # Ajustar qubits en todas las funciones circuit.xxx(...)
+                    if 'circuit.' in line:
+                        def shift_qubits(match):
+                            inner = match.group(1)
+                            parts = [p.strip() for p in inner.split(",")]
+                            new_parts = []
+                            for p in parts:
+                                # Solo se desplazan números (qubits)
+                                if p.isdigit():
+                                    new_parts.append(str(int(p) + composition_offset))
+                                else:
+                                    new_parts.append(p)
+                            return "(" + ", ".join(new_parts) + ")"
 
+                        line = re.sub(r'\(([^)]*)\)', shift_qubits, line)
 
-            if provider == 'ibm' and batch_idx < len(urls) - 1:
-                code.append("circuit.barrier()")
-                for i in range(composition_qubits):
-                    code.append(f"circuit.reset(qreg_q[{i}])")
-            composition_qubits = 0
+                    assembled.append(line)
 
-        # Barrera global al final (para separar batches en IBM)
-        
-            
+            # avanzar offsets globales
+            composition_offset += num_qubits
+            classical_offset += num_qubits
+            qb.append(num_qubits)
 
+        # ---------------------------
+        #  Añadir el cuerpo final
+        # ---------------------------
+        code.extend(assembled)
         code.append("return circuit")
+
+
+
+    
+    
+    #Tiempo HORIZONTAL MODIFICADA PARA AWS
+    def send(self, queue: list, max_qubits: int, provider: str, executeCircuit: Callable, machine: str) -> None:
+        """
+        Ejecuta batches normalmente, pero cada vez que la suma total de qubits acumulados
+        supera el límite global, ejecuta inmediatamente y continúa con la siguiente tanda.
+        Además, guarda información detallada de cada circuito ejecutado en 'resultadosTodos/info_1/info.txt'.
+        """
+        if not queue:
+            print("\n✅ No hay más elementos en la cola. Programa finalizado.\n")
+            return
+
+        if not hasattr(self, "urls_ya_procesados"):
+            self.urls_ya_procesados = set()
+
+        if not hasattr(self, "current_classical_index_global"):
+            self.current_classical_index_global = 0  # 🔹 contador global continuo de registros clásicos
+
+        self.iteracion_tiempo += 1
+        colas_sin_criterio = self.obtener_colas_sin_criterio(queue)
+
+        # 🔹 Carpeta principal y subcarpeta personalizadas fuera de CARPETA_SALIDAS
+        carpeta_resultados = os.path.join(os.getcwd(), "resultadosTodos")
+        carpeta_info = os.path.join(carpeta_resultados, f"resultadosAWS_{self.resultado}_batch")
+
+        os.makedirs(carpeta_info, exist_ok=True)  # 🔹 Crea ambas carpetas si no existen
+
+        # 🔹 Archivo de información
+        info_file = os.path.join(carpeta_info, f"info_{self.resultado}.txt")
+
+        # 🔹 Archivo criterio_tiempo sigue en CARPETA_SALIDAS
+        file_name = os.path.join(CARPETA_SALIDAS, f"criterio_tiempo{self.resultado}.txt")
+
+        elementos_procesados_total = 0
+        LIMITE_EJECUCION_QUBITS = 70000
+
+        # 🔹 Reinicia el archivo info.txt solo la primera vez
+        if self.iteracion_tiempo == 1:
+            with open(info_file, "w") as f:
+                f.write("=== Información de circuitos ejecutados ===\n")
+
+        for criterio, cola_original in colas_sin_criterio.items():
+            if not cola_original:
+                continue
+
+            cola = list(cola_original)
+            batches = []
+            sumQb_total = 0
+            batch_counter = 1
+            current_qubit_index = 0
+
+            for url in list(cola):
+                if url in self.urls_ya_procesados:
+                    continue
+
+                if not batches or (batches[-1][1] + url[1]) > max_qubits:
+                    batches.append(([url], url[1], batch_counter))
+                    batch_counter += 1
+                    current_qubit_index = 0
+                else:
+                    batches[-1][0].append(url)
+                    batches[-1] = (batches[-1][0], batches[-1][1] + url[1], batches[-1][2])
+
+                self.urls_ya_procesados.add(url)
+                if url in queue:
+                    queue.remove(url)
+                if url in cola_original:
+                    cola_original.remove(url)
+
+                sumQb_total += url[1]
+
+                circuito_id = url[4]
+                num_qubits = url[1]
+
+                # 🔹 rango clásico continuo
+                reg_inicio = f"c{self.current_classical_index_global}"
+                reg_final = f"c{self.current_classical_index_global + num_qubits - 1}"
+
+                # 🔹 escribir en info.txt (sin "Qubits usados")
+                with open(info_file, "a") as info:
+                    info.write(
+                        f"Circuito: {circuito_id} | "
+                        f"Registros clásicos: {reg_inicio} - {reg_final} | "
+                        f"Iteración: {self.iteracion_tiempo} | Batch: {batch_counter - 1}\n"
+                    )
+
+                # avanzar índices
+                self.current_classical_index_global += num_qubits
+                current_qubit_index += 1
+
+                # ⚡ Si superamos el límite global, ejecutar inmediatamente
+                if sumQb_total >= LIMITE_EJECUCION_QUBITS:
+                    with open(file_name, "a") as file:
+                        file.write(f"\n Iteración {self.iteracion_tiempo} - Máquina: {machine} -- Límite ejecución: {LIMITE_EJECUCION_QUBITS} qubits\n")
+                        for urls_batch, sumQb_b, batch_num_b in batches:
+                            file.write(f"  Batch #{batch_num_b}: [")
+                            for u in urls_batch:
+                                file.write(f"('{u[4]}', {u[1]} qubits, shots={u[2]}), ")
+                            file.write("]\n")
+                            file.write(f"    Total qubits usados: {sumQb_b}\n")
+
+                    code, qb = [], []
+                    shotsUsr = [1] * sum(len(batch[0]) for batch in batches) #DONDE SE PONEN LOS SHOTS
+                    self.create_circuit(batches, code, qb, provider)
+
+                    print(f"///////// EJECUTANDO ITERACIÓN {self.iteracion_tiempo} /////////")
+                    data = {"code": code}
+                    all_urls = [u for batch in batches for u in batch[0]]
+
+                    executeCircuit(json.dumps(data), qb, shotsUsr, provider, all_urls, machine)
+                    elementos_procesados_total += len(all_urls)
+
+                    # reinicios parciales
+                    self.iteracion_tiempo += 1
+                    batches = []
+                    sumQb_total = 0
+                    batch_counter = 1
+                    current_qubit_index = 0
+
+            # ⚠ ejecutar los que quedaron
+            if batches:
+                with open(file_name, "a") as file:
+                    file.write(f"\n Iteración {self.iteracion_tiempo} - Máquina: {machine} -- Ejecución final parcial\n")
+                    for urls_batch, sumQb_b, batch_num_b in batches:
+                        file.write(f"  Batch #{batch_num_b}: [")
+                        for u in urls_batch:
+                            file.write(f"('{u[4]}', {u[1]} qubits, shots={u[2]}), ")
+                        file.write("]\n")
+                        file.write(f"    Total qubits usados: {sumQb_b}\n")
+
+                code, qb = [], []
+                shotsUsr = [1] * sum(len(batch[0]) for batch in batches) #DONDE SE PONEN LOS SHOTS
+                self.create_circuit(batches, code, qb, provider)
+
+                print(f"///////// EJECUTANDO ITERACIÓN FINAL {self.iteracion_tiempo} /////////")
+                data = {"code": code}
+                all_urls = [u for batch in batches for u in batch[0]]
+
+                executeCircuit(json.dumps(data), qb, shotsUsr, provider, all_urls, machine)
+                elementos_procesados_total += len(all_urls)
+
+        if elementos_procesados_total == 0:
+            print(f"\n⚠ Iteración {self.iteracion_tiempo} no generó batches (cola vacía o sin circuitos válidos).")
+        else:
+            print(f"\n✅ Iteraciones completadas. Circuitos totales procesados: {elementos_procesados_total}")
+            print(f"📌 Total acumulado: {len(self.urls_ya_procesados)} circuitos únicos ejecutados.\n")
+
+
+
+
+        
+    # def encontrar_mejor_batch(self, cola, max_qubits):
+    #     mejor_batch = []
+    #     mejor_suma = 0
+    #     vistos = set()
+
+    #     for r in range(1, len(cola) + 1):
+    #         for combo in combinations(cola, r):
+    #             ids = tuple(sorted(id(x) for x in combo))
+    #             if ids in vistos:
+    #                 continue
+    #             vistos.add(ids)
+
+    #             total = sum(x[1] for x in combo)
+    #             if total <= max_qubits and total > mejor_suma:
+    #                 mejor_batch = list(combo)
+    #                 mejor_suma = total
+    #                 if mejor_suma == max_qubits:
+    #                     return mejor_batch
+    #     return mejor_batch
 
 
     # #POLITICA DE TIEMPO HORIZONTAL
@@ -562,175 +1006,7 @@ class SchedulerPolicies:
 
 
 
-    def send(self, queue: list, max_qubits: int, provider: str, executeCircuit: Callable, machine: str) -> None:
-        """
-        Ejecuta batches normalmente, pero cada vez que la suma total de qubits acumulados
-        supera el límite global, ejecuta inmediatamente y continúa con la siguiente tanda.
-        Además, guarda información detallada de cada circuito ejecutado en 'resultadosTodos/info_1/info.txt'.
-        """
-        if not queue:
-            print("\n✅ No hay más elementos en la cola. Programa finalizado.\n")
-            return
-
-        if not hasattr(self, "urls_ya_procesados"):
-            self.urls_ya_procesados = set()
-
-        if not hasattr(self, "current_classical_index_global"):
-            self.current_classical_index_global = 0  # 🔹 contador global continuo de registros clásicos
-
-        self.iteracion_tiempo += 1
-        colas_sin_criterio = self.obtener_colas_sin_criterio(queue)
-
-        # 🔹 Carpeta principal y subcarpeta personalizadas fuera de CARPETA_SALIDAS
-        carpeta_resultados = os.path.join(os.getcwd(), "resultadosTodos")
-        carpeta_info = os.path.join(carpeta_resultados, "resultadosIBM_506_batch")
-
-        os.makedirs(carpeta_info, exist_ok=True)  # 🔹 Crea ambas carpetas si no existen
-
-        # 🔹 Archivo de información
-        info_file = os.path.join(carpeta_info, "info_506.txt")
-
-        # 🔹 Archivo criterio_tiempo sigue en CARPETA_SALIDAS
-        file_name = os.path.join(CARPETA_SALIDAS, "criterio_tiempo.txt")
-
-        elementos_procesados_total = 0
-        LIMITE_EJECUCION_QUBITS = 70000
-
-        # 🔹 Reinicia el archivo info.txt solo la primera vez
-        if self.iteracion_tiempo == 1:
-            with open(info_file, "w") as f:
-                f.write("=== Información de circuitos ejecutados ===\n")
-
-        for criterio, cola_original in colas_sin_criterio.items():
-            if not cola_original:
-                continue
-
-            cola = list(cola_original)
-            batches = []
-            sumQb_total = 0
-            batch_counter = 1
-            current_qubit_index = 0
-
-            for url in list(cola):
-                if url in self.urls_ya_procesados:
-                    continue
-
-                if not batches or (batches[-1][1] + url[1]) > max_qubits:
-                    batches.append(([url], url[1], batch_counter))
-                    batch_counter += 1
-                    current_qubit_index = 0
-                else:
-                    batches[-1][0].append(url)
-                    batches[-1] = (batches[-1][0], batches[-1][1] + url[1], batches[-1][2])
-
-                self.urls_ya_procesados.add(url)
-                if url in queue:
-                    queue.remove(url)
-                if url in cola_original:
-                    cola_original.remove(url)
-
-                sumQb_total += url[1]
-
-                circuito_id = url[4]
-                num_qubits = url[1]
-
-                # 🔹 rango clásico continuo
-                reg_inicio = f"c{self.current_classical_index_global}"
-                reg_final = f"c{self.current_classical_index_global + num_qubits - 1}"
-
-                # 🔹 escribir en info.txt (sin "Qubits usados")
-                with open(info_file, "a") as info:
-                    info.write(
-                        f"Circuito: {circuito_id} | "
-                        f"Registros clásicos: {reg_inicio} - {reg_final} | "
-                        f"Iteración: {self.iteracion_tiempo} | Batch: {batch_counter - 1}\n"
-                    )
-
-                # avanzar índices
-                self.current_classical_index_global += num_qubits
-                current_qubit_index += 1
-
-                # ⚡ Si superamos el límite global, ejecutar inmediatamente
-                if sumQb_total >= LIMITE_EJECUCION_QUBITS:
-                    with open(file_name, "a") as file:
-                        file.write(f"\n Iteración {self.iteracion_tiempo} - Máquina: {machine} -- Límite ejecución: {LIMITE_EJECUCION_QUBITS} qubits\n")
-                        for urls_batch, sumQb_b, batch_num_b in batches:
-                            file.write(f"  Batch #{batch_num_b}: [")
-                            for u in urls_batch:
-                                file.write(f"('{u[4]}', {u[1]} qubits, shots={u[2]}), ")
-                            file.write("]\n")
-                            file.write(f"    Total qubits usados: {sumQb_b}\n")
-
-                    code, qb = [], []
-                    shotsUsr = [1000] * sum(len(batch[0]) for batch in batches)
-                    self.create_circuit(batches, code, qb, provider)
-
-                    print(f"///////// EJECUTANDO ITERACIÓN {self.iteracion_tiempo} /////////")
-                    data = {"code": code}
-                    all_urls = [u for batch in batches for u in batch[0]]
-
-                    executeCircuit(json.dumps(data), qb, shotsUsr, provider, all_urls, machine)
-                    elementos_procesados_total += len(all_urls)
-
-                    # reinicios parciales
-                    self.iteracion_tiempo += 1
-                    batches = []
-                    sumQb_total = 0
-                    batch_counter = 1
-                    current_qubit_index = 0
-
-            # ⚠ ejecutar los que quedaron
-            if batches:
-                with open(file_name, "a") as file:
-                    file.write(f"\n Iteración {self.iteracion_tiempo} - Máquina: {machine} -- Ejecución final parcial\n")
-                    for urls_batch, sumQb_b, batch_num_b in batches:
-                        file.write(f"  Batch #{batch_num_b}: [")
-                        for u in urls_batch:
-                            file.write(f"('{u[4]}', {u[1]} qubits, shots={u[2]}), ")
-                        file.write("]\n")
-                        file.write(f"    Total qubits usados: {sumQb_b}\n")
-
-                code, qb = [], []
-                shotsUsr = [1000] * sum(len(batch[0]) for batch in batches)
-                self.create_circuit(batches, code, qb, provider)
-
-                print(f"///////// EJECUTANDO ITERACIÓN FINAL {self.iteracion_tiempo} /////////")
-                data = {"code": code}
-                all_urls = [u for batch in batches for u in batch[0]]
-
-                executeCircuit(json.dumps(data), qb, shotsUsr, provider, all_urls, machine)
-                elementos_procesados_total += len(all_urls)
-
-        if elementos_procesados_total == 0:
-            print(f"\n⚠ Iteración {self.iteracion_tiempo} no generó batches (cola vacía o sin circuitos válidos).")
-        else:
-            print(f"\n✅ Iteraciones completadas. Circuitos totales procesados: {elementos_procesados_total}")
-            print(f"📌 Total acumulado: {len(self.urls_ya_procesados)} circuitos únicos ejecutados.\n")
-
-
-
-
-
-        
-    # def encontrar_mejor_batch(self, cola, max_qubits):
-    #     mejor_batch = []
-    #     mejor_suma = 0
-    #     vistos = set()
-
-    #     for r in range(1, len(cola) + 1):
-    #         for combo in combinations(cola, r):
-    #             ids = tuple(sorted(id(x) for x in combo))
-    #             if ids in vistos:
-    #                 continue
-    #             vistos.add(ids)
-
-    #             total = sum(x[1] for x in combo)
-    #             if total <= max_qubits and total > mejor_suma:
-    #                 mejor_batch = list(combo)
-    #                 mejor_suma = total
-    #                 if mejor_suma == max_qubits:
-    #                     return mejor_batch
-    #     return mejor_batch
+    
 
 
     def send_shots_optimized(self,queue:list, max_qubits:int, provider:str, executeCircuit:Callable, machine:str) -> None:
@@ -1093,20 +1369,20 @@ class SchedulerPolicies:
 
 
 
-    def obtener_dispositivos_ibm(self):
-        """Obtiene la lista de dispositivos de IBM Quantum."""
-        try:
-            # Crear una instancia de la clase IBM
-            dispositivos = self.executeCircuitIBM.IBM()  # ✅ Ahora IBM() devuelve dispositivos
+    # def obtener_dispositivos_ibm(self):
+    #     """Obtiene la lista de dispositivos de IBM Quantum."""
+    #     try:
+    #         # Crear una instancia de la clase IBM
+    #         dispositivos = self.executeCircuitIBM.IBM()  # ✅ Ahora IBM() devuelve dispositivos
             
-            # Debugging
-            #print(" Dispositivos obtenidos de IBM:", dispositivos)
+    #         # Debugging
+    #         #print(" Dispositivos obtenidos de IBM:", dispositivos)
 
-            return dispositivos  # ✅ Devolver la lista correctamente
+    #         return dispositivos  # ✅ Devolver la lista correctamente
 
-        except Exception as e:
-            print(f"Error al obtener dispositivos de IBM: {e}")
-            return []
+    #     except Exception as e:
+    #         print(f"Error al obtener dispositivos de IBM: {e}")
+    #         return []
 
     
 

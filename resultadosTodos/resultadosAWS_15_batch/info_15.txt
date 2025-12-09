@@ -1,0 +1,13 @@
+=== Información de circuitos ejecutados ===
+Circuito: phase_estimation.py | Registros clásicos: c0 - c3 | Iteración: 1 | Batch: 1
+Circuito: qft.py | Registros clásicos: c4 - c6 | Iteración: 1 | Batch: 1
+Circuito: grover.py | Registros clásicos: c7 - c8 | Iteración: 1 | Batch: 1
+Circuito: qaoa.py | Registros clásicos: c9 - c10 | Iteración: 1 | Batch: 1
+Circuito: qwalk.py | Registros clásicos: c11 - c13 | Iteración: 1 | Batch: 1
+Circuito: bernstein-vazirani.py | Registros clásicos: c14 - c17 | Iteración: 1 | Batch: 1
+Circuito: simon.py | Registros clásicos: c18 - c23 | Iteración: 1 | Batch: 1
+Circuito: Deutsch-Jozsa.py | Registros clásicos: c24 - c27 | Iteración: 1 | Batch: 1
+Circuito: kickback.py | Registros clásicos: c28 - c29 | Iteración: 1 | Batch: 1
+Circuito: tsp.py | Registros clásicos: c30 - c32 | Iteración: 1 | Batch: 1
+Circuito: shor.py | Registros clásicos: c33 - c36 | Iteración: 1 | Batch: 2
+Circuito: full_adder.py | Registros clásicos: c37 - c40 | Iteración: 1 | Batch: 2
