@@ -1,3 +1,4 @@
+import re
 from braket.circuits import Circuit
 import braket.circuits
 from braket.devices import LocalSimulator
@@ -17,7 +18,7 @@ import numpy as np
 
 from braket.circuits import Circuit, Instruction, Gate
 from braket.circuits.compiler_directive import CompilerDirective
-
+from braket.circuits import Circuit, Gate, QubitSet
 
 
 import boto3
@@ -41,6 +42,7 @@ def code_to_circuit_aws(code_str:str) -> braket.circuits.circuit.Circuit: #Inver
         lines = code_str.strip().split('\n')
         # Initialize the circuit
         circuit = braket.circuits.Circuit()
+        print(dir(circuit))
         safe_namespace = {'np': np, 'pi': np.pi}
         # Process each line
         for line in lines:
@@ -52,24 +54,41 @@ def code_to_circuit_aws(code_str:str) -> braket.circuits.circuit.Circuit: #Inver
                 gate_name = operation.split('(')[0].strip()
                 
                  # 🔹 Reconocer barreras ESTO DE LAS BARRERAS LO HE AÑADIDO YO y estaba bien
-                if gate_name == 'barrier':
-                    # Braket no tiene barreras, pero podemos guardarlo como comentario
-                    #circuit.add_instruction("barrier")
-                    #circuit.add(CompilerDirective("barrier"))
-                    # circuit._instructions.append("BARRIER")   # <-- Marca textual
-                    #circuit.add_instruction(("BARRIER",))
-                    circuit += Instruction(Gate.I(), target=BARRIER_QUBIT)
-                    continue
-
                 # if gate_name == 'barrier':
-                #     args = operation.split('(')[1].strip(')').split(',')
-                #     if args == [''] or args == ['None']:
-                #         #circuit.barrier()  # aplica a todos los qubits
-                #         circuit.add(CompilerDirective("barrier"))
-                #     else:
-                #         targets = [int(arg.strip()) for arg in args]
-                #         circuit.barrier(targets)
+                #     # Braket no tiene barreras, pero podemos guardarlo como comentario
+                #     #circuit.add_instruction("barrier")
+                #     #circuit.add(CompilerDirective("barrier"))
+                #     # circuit._instructions.append("BARRIER")   # <-- Marca textual
+                #     #circuit.add_instruction(("BARRIER",))
+                #     circuit += Instruction(Gate.I(), target=BARRIER_QUBIT)
                 #     continue
+                # if gate_name == 'barrier':
+                #     circuit += Instruction(Gate.I(), target=BARRIER_QUBIT) # <--- Aquí se usa BARRIER_QUBIT
+                #     continue
+             
+                # ------------------------
+                # MEASURE (FIX ABSOLUTO)
+                # ------------------------
+                if gate_name == "measure":
+                    args = operation.split('(')[1].strip(')').split(',')
+                    q = int(args[0])
+                    circuit.measure(q)
+                    continue
+                if gate_name == "barrier":
+                    # arg_str = operation.split('(')[1].strip(')')
+                    # if arg_str:
+                    #     # Quitar corchetes si existen
+                    #     arg_str = arg_str.replace('[','').replace(']','')
+                    #     qubits = [int(q.strip()) for q in arg_str.split(',')]
+                    #     circuit.barrier(target=qubits)
+                    # else:
+                    #     # Barrier en todos los qubits
+                    circuit.barrier()
+                    continue
+                
+
+               
+
                     
                 args = operation.split('(')[1].strip(')').split(',')
                 if gate_name in ['rx', 'ry', 'rz', 'gpi', 'gpi2', 'phaseshift']:
