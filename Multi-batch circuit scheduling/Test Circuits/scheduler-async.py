@@ -134,7 +134,7 @@ async def main():
             time_policy_data = {
                 "url": url_value,
                 "shots": 10000,
-                "provider": ['ibm'],
+                "provider": ['micorosoft'], #CAMBIO AQUI PARA PROBAR MICROSOFT
                 "policy": "multibatch", #time o batch o multibatch
                 "criterio": 0
             }
